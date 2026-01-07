@@ -4,8 +4,6 @@ mod network;
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::time::Duration;
-use std::collections::HashSet;
-use std::thread;
 
 use crossterm::{
     execute,
@@ -48,7 +46,7 @@ fn main() -> std::io::Result<()> {
                 if peers.is_empty() {
                     println!("No peers found yet.");
                 } else {
-                    for peer in peers.iter() {
+                    for (peer, _) in peers.iter() {
                         println!(" - {}", peer);
                     }
                 }
@@ -76,41 +74,48 @@ fn main() -> std::io::Result<()> {
 }
 
 fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
-    
     enable_raw_mode()?; 
     let mut stdout = io::stdout();
-    
-    execute!(stdout, EnterAlternateScreen, cursor::MoveTo(0, 0), cursor::Show)?;
-    
+
+    execute!(stdout, EnterAlternateScreen, cursor::Show)?;
+    execute!(stdout, cursor::MoveTo(0, 0))?;
     println!("(Press 'q' or 'Esc' to return to menu)\r");
     println!("{}\r", "Scanning for Peers...".yellow());
     println!("{}\r", "---------------------------------".dimmed());
-
-    let mut displayed_peers = HashSet::new();
 
     loop {
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        break;
-                    }
+                    KeyCode::Char('q') | KeyCode::Esc => break,
                     _ => {}
                 }
             }
         }
 
         let current_peers = shared_peers.lock().unwrap();
-        
-        for peer in current_peers.iter() {
-            if !displayed_peers.contains(peer) {
-                println!("{} {}\r", "+".green(), peer);
-                displayed_peers.insert(*peer);
+
+        execute!(
+            stdout, 
+            cursor::MoveTo(0, 3), 
+            Clear(ClearType::FromCursorDown)
+        )?;
+
+        if current_peers.is_empty() {
+             println!("{}\r", "Waiting for signals...".italic().dimmed());
+        } else {
+            let mut sorted_peers: Vec<_> = current_peers.keys().collect();
+            sorted_peers.sort();
+
+            for peer in sorted_peers {
+                println!("{} {}\r", "•".green(), peer);
             }
         }
+        
         drop(current_peers);
-        thread::sleep(Duration::from_millis(50));
+        stdout.flush()?;
     }
+    
     execute!(stdout, LeaveAlternateScreen, cursor::Show)?;
     disable_raw_mode()?;
     Ok(())
