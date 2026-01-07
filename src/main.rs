@@ -9,7 +9,7 @@ use std::thread;
 
 use crossterm::{
     execute,
-    terminal::{Clear, ClearType, SetTitle, enable_raw_mode, disable_raw_mode},
+    terminal::{Clear, ClearType, SetTitle, enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     event::{self, KeyCode, Event},
     cursor,
 };
@@ -41,8 +41,6 @@ fn main() -> std::io::Result<()> {
         match command {
             "find" => {
                 monitor_peers(&known_peers)?;
-                clear_screen();
-                print_banner(); 
             }
             "find-quick" => {
                 let peers = known_peers.lock().unwrap();
@@ -82,7 +80,7 @@ fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
     enable_raw_mode()?; 
     let mut stdout = io::stdout();
     
-    execute!(stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+    execute!(stdout, EnterAlternateScreen, cursor::MoveTo(0, 0), cursor::Show)?;
     
     println!("(Press 'q' or 'Esc' to return to menu)\r");
     println!("{}\r", "Scanning for Peers...".yellow());
@@ -113,6 +111,7 @@ fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
         drop(current_peers);
         thread::sleep(Duration::from_millis(50));
     }
+    execute!(stdout, LeaveAlternateScreen, cursor::Show)?;
     disable_raw_mode()?;
     Ok(())
 }
