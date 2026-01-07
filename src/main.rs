@@ -44,13 +44,27 @@ fn main() -> std::io::Result<()> {
                 clear_screen();
                 print_banner(); 
             }
+            "find-quick" => {
+                let peers = known_peers.lock().unwrap();
+                println!("{}", "--- Known Peers ---".yellow());
+                if peers.is_empty() {
+                    println!("No peers found yet.");
+                } else {
+                    for peer in peers.iter() {
+                        println!(" - {}", peer);
+                    }
+                }
+                println!("{}", "-------------------".yellow());
+            }
             "cls" | "clear" => {
                 clear_screen();
                 print_banner();
             }
             "help" => {
-                println!("  find  - Live monitor of active peers");
-                println!("  exit  - Close the application");
+                println!("  find        - Live monitor of active peers (Raw Mode)");
+                println!("  find-quick  - List currently known peers immediately");
+                println!("  cls | clear - Clear screen");
+                println!("  exit        - Close the application");
             }
             "exit" => {
                 println!("Shutting down Sandesh...");
