@@ -1,8 +1,10 @@
 mod state;
 mod network;
+mod chat;
 
 use std::io::{self, Write};
 use std::net::UdpSocket;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
@@ -13,7 +15,7 @@ use crossterm::{
 };
 use colored::*;
 
-const PORT: u16 = 8888;
+const PORT: u16 = 3000;
 
 fn main() -> std::io::Result<()> {
     
@@ -22,19 +24,29 @@ fn main() -> std::io::Result<()> {
     socket.set_broadcast(true).expect("set_broadcast failed");
 
     let known_peers = state::init_peers();
-    network::start_background_tasks(socket, known_peers.clone(), PORT);
+    let (tx, rx) = mpsc::channel();
+    network::start_background_tasks(socket, known_peers.clone(), PORT, tx);
 
     clear_screen();
     print_banner();
 
     loop {
         
-        print!("{}", "\nSANDESH >> ".green().bold());
-        io::stdout().flush()?;
+        if let Ok(stream) = rx.try_recv() {
+            chat::handle_incoming_request(stream)?;
+            print_prompt(); 
+        }
+
+        print_prompt();
         
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        let command = input.trim();
+        let command_line = input.trim();
+
+        let parts: Vec<&str> = command_line.split_whitespace().collect();
+        if parts.is_empty() { continue; }
+        let command = parts[0];
+        let args = &parts[1..];
 
         match command {
             "find" => {
@@ -52,15 +64,30 @@ fn main() -> std::io::Result<()> {
                 }
                 println!("{}", "-------------------".yellow());
             }
+            "connect" => {
+                if args.is_empty() {
+                    println!("Usage: connect <IP:PORT> (e.g., connect 192.168.1.5:8888)");
+                } else {
+                    // If user forgot port, append default
+                    let target = if args[0].contains(':') {
+                        args[0].to_string()
+                    } else {
+                        format!("{}:{}", args[0], PORT)
+                    };
+                    
+                    chat::initiate_connection(&target)?;
+                }
+            }
             "cls" | "clear" => {
                 clear_screen();
                 print_banner();
             }
             "help" => {
-                println!("  find        - Live monitor of active peers (Raw Mode)");
-                println!("  find-quick  - List currently known peers immediately");
-                println!("  cls | clear - Clear screen");
-                println!("  exit        - Close the application");
+                println!("  find              - Live monitor of active peers (Raw Mode)");
+                println!("  find-quick        - List currently known peers immediately");
+                println!("  connect <ip:port> - Request chat with a peer");
+                println!("  cls | clear       - Clear screen");
+                println!("  exit              - Close the application");
             }
             "exit" => {
                 println!("Shutting down Sandesh...");
@@ -71,6 +98,11 @@ fn main() -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_prompt() {
+    print!("{}", "\nSANDESH >> ".green().bold());
+    io::stdout().flush().unwrap();
 }
 
 fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
