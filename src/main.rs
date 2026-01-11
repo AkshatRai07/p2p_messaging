@@ -16,7 +16,7 @@ use crossterm::{
 };
 use colored::*;
 
-const PORT: u16 = 3000;
+const PORT: u16 = 3001;
 
 fn main() -> std::io::Result<()> {
     execute!(io::stdout(), SetTitle("Sandesh P2P"))?;

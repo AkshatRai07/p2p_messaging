@@ -2,6 +2,11 @@
 name = "sandesh"
 version = "0.1.0"
 edition = "2024"
+description = "A P2P E2EE Terminal Messaging App"
+readme = "README.md"
+license = "MIT"
+license-file = "LICENSE"
+repository = "https://github.com/AkshatRai07/p2p_messaging"
 
 [dependencies]
 crossterm = "0.27"
