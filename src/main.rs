@@ -8,10 +8,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
+    cursor,
     execute,
     terminal::{Clear, ClearType, SetTitle, enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     event::{self, KeyCode, Event},
-    cursor,
 };
 use colored::*;
 
@@ -30,78 +30,108 @@ fn main() -> std::io::Result<()> {
     clear_screen();
     print_banner();
 
+    enable_raw_mode()?;
+    print_prompt("");
+
+    let mut input_buffer = String::new();
+
     loop {
-        
         if let Ok(stream) = rx.try_recv() {
+            disable_raw_mode()?; 
             chat::handle_incoming_request(stream)?;
-            print_prompt(); 
+            enable_raw_mode()?;
+            print_prompt(&input_buffer); 
         }
 
-        print_prompt();
-        
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let command_line = input.trim();
-
-        let parts: Vec<&str> = command_line.split_whitespace().collect();
-        if parts.is_empty() { continue; }
-        let command = parts[0];
-        let args = &parts[1..];
-
-        match command {
-            "find" => {
-                monitor_peers(&known_peers)?;
-            }
-            "find-quick" => {
-                let peers = known_peers.lock().unwrap();
-                println!("{}", "--- Known Peers ---".yellow());
-                if peers.is_empty() {
-                    println!("No peers found yet.");
-                } else {
-                    for (peer, _) in peers.iter() {
-                        println!(" - {}", peer);
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char(c) => {
+                        input_buffer.push(c);
+                        print!("{}", c);
+                        io::stdout().flush()?;
                     }
+                    KeyCode::Backspace => {
+                        if input_buffer.pop().is_some() {
+                            print!("\x08 \x08"); 
+                            io::stdout().flush()?;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        println!("\r");
+                        let command_line = input_buffer.clone();
+                        input_buffer.clear();
+
+                        disable_raw_mode()?; 
+                        handle_command(&command_line, &known_peers)?;
+                        enable_raw_mode()?;
+
+                        print_prompt("");
+                    }
+                    _ => {}
                 }
-                println!("{}", "-------------------".yellow());
             }
-            "connect" => {
-                if args.is_empty() {
-                    println!("Usage: connect <IP:PORT> (e.g., connect 192.168.1.5:8888)");
-                } else {
-                    // If user forgot port, append default
-                    let target = if args[0].contains(':') {
-                        args[0].to_string()
-                    } else {
-                        format!("{}:{}", args[0], PORT)
-                    };
-                    
-                    chat::initiate_connection(&target)?;
-                }
-            }
-            "cls" | "clear" => {
-                clear_screen();
-                print_banner();
-            }
-            "help" => {
-                println!("  find              - Live monitor of active peers (Raw Mode)");
-                println!("  find-quick        - List currently known peers immediately");
-                println!("  connect <ip:port> - Request chat with a peer");
-                println!("  cls | clear       - Clear screen");
-                println!("  exit              - Close the application");
-            }
-            "exit" => {
-                println!("Shutting down Sandesh...");
-                break;
-            }
-            "" => {} 
-            _ => println!("Unknown command."),
         }
+    }
+}
+
+fn handle_command(input: &str, known_peers: &state::PeerMap) -> io::Result<()> {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.is_empty() { return Ok(()); }
+    
+    let command = parts[0];
+    let args = &parts[1..];
+
+    match command {
+        "find" => {
+            monitor_peers(known_peers)?;
+        }
+        "find-quick" => {
+            let peers = known_peers.lock().unwrap();
+            println!("{}", "--- Known Peers ---".yellow());
+            if peers.is_empty() {
+                println!("No peers found yet.");
+            } else {
+                for (peer, _) in peers.iter() {
+                    println!(" - {}", peer);
+                }
+            }
+            println!("{}", "-------------------".yellow());
+        }
+        "connect" => {
+            if args.is_empty() {
+                println!("Usage: connect <IP:PORT>");
+            } else {
+                let target = if args[0].contains(':') {
+                    args[0].to_string()
+                } else {
+                    format!("{}:{}", args[0], PORT)
+                };
+                chat::initiate_connection(&target)?;
+            }
+        }
+        "cls" | "clear" => {
+            clear_screen();
+            print_banner();
+        }
+        "help" => {
+            println!("  find              - Live monitor of active peers");
+            println!("  find-quick        - List known peers");
+            println!("  connect <ip:port> - Request chat");
+            println!("  cls | clear       - Clear screen");
+            println!("  exit              - Close application");
+        }
+        "exit" => {
+            println!("Shutting down...");
+            std::process::exit(0);
+        }
+        _ => println!("Unknown command."),
     }
     Ok(())
 }
 
-fn print_prompt() {
-    print!("{}", "\nSANDESH >> ".green().bold());
+fn print_prompt(current_input: &str) {
+    print!("\r{} {}", "\nSANDESH >> ".green().bold(), current_input);
     io::stdout().flush().unwrap();
 }
 

@@ -5,54 +5,46 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    style::{Print, Color, SetForegroundColor},
 };
 use colored::*;
 
-// Protocol Signals
 const SIGNAL_ACCEPT: u8 = b'Y';
 const SIGNAL_REJECT: u8 = b'N';
 
-/// The Receiver side: Prompts user to accept/reject
 pub fn handle_incoming_request(mut stream: TcpStream) -> io::Result<()> {
     let peer_addr = stream.peer_addr()?;
-    
-    // Clear current line and ask
+
     print!("\r\n{} {} {} (y/n)? ", "Incoming connection from".yellow(), peer_addr, "Accept".bold());
     io::stdout().flush()?;
 
-    // Simple blocking input for the Y/N decision
     let mut response = String::new();
     io::stdin().read_line(&mut response)?;
 
     if response.trim().eq_ignore_ascii_case("y") {
-        // Send Accept Signal
         stream.write_all(&[SIGNAL_ACCEPT])?;
         enter_chat_window(stream)?;
     } else {
-        // Send Reject Signal
-        let _ = stream.write_all(&[SIGNAL_REJECT]); // Ignore error if they disconnected
+        let _ = stream.write_all(&[SIGNAL_REJECT]); 
         println!("{}", "Connection rejected.".red());
     }
     Ok(())
 }
 
-/// The Sender side: Initiates connection and waits for response
 pub fn initiate_connection(target_ip: &str) -> io::Result<()> {
     println!("{}", format!("Connecting to {}...", target_ip).yellow());
     
     match TcpStream::connect(target_ip) {
         Ok(mut stream) => {
-            // Set a timeout for the handshake so we don't hang forever
             stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-
             println!("Waiting for peer to accept...");
             
             let mut buffer = [0u8; 1];
             match stream.read_exact(&mut buffer) {
                 Ok(_) => {
                     if buffer[0] == SIGNAL_ACCEPT {
-                        stream.set_read_timeout(None)?; // Remove timeout for chat
+                        stream.set_read_timeout(None)?; 
                         enter_chat_window(stream)?;
                     } else {
                         println!("{}", "Connection was rejected by peer.".red());
@@ -66,55 +58,119 @@ pub fn initiate_connection(target_ip: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// The actual Chat UI (Alternate Screen)
 fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::MoveTo(0, 0), Clear(ClearType::All))?;
+    execute!(stdout, EnterAlternateScreen, Clear(ClearType::All))?;
 
-    // Non-blocking stream so we can read and type at the same time
     stream.set_nonblocking(true)?;
 
-    println!("Connected to {}.\r", stream.peer_addr()?);
-    println!("(Press 'Esc' to disconnect)\r");
-    println!("---------------------------------\r");
+    let peer_addr = stream.peer_addr()?.to_string();
+    let mut input_buffer = String::new();
+    let mut messages: Vec<String> = Vec::new();
+
+    messages.push(format!("Connected to {}.", peer_addr));
+    messages.push("Press 'Esc' to disconnect.".to_string());
+    messages.push("---------------------------------".to_string());
+
+    draw_ui(&mut stdout, &messages, &input_buffer)?;
 
     loop {
-        // 1. Check for User Input (Poll)
-        if event::poll(Duration::from_millis(50))? {
+        let mut needs_redraw = false;
+
+        if event::poll(Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Esc => break, // Exit chat
-                    // Here you would add logic to capture chars and send them
-                    // For now, we just exit on Esc as requested
+                    KeyCode::Esc => break,
+                    KeyCode::Enter => {
+                        if !input_buffer.is_empty() {
+                            if let Err(e) = stream.write_all(input_buffer.as_bytes()) {
+                                messages.push(format!("Error sending: {}", e));
+                            } else {
+                                // Add to our history
+                                messages.push(format!("{} >> {}", "[You] ".green(), input_buffer));
+                                input_buffer.clear();
+                            }
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        input_buffer.push(c);
+                        needs_redraw = true;
+                    }
+                    KeyCode::Backspace => {
+                        input_buffer.pop();
+                        needs_redraw = true;
+                    }
                     _ => {}
                 }
             }
         }
 
-        // 2. Check for Incoming Data (Non-blocking Read)
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 512];
         match stream.read(&mut buffer) {
             Ok(0) => {
-                // Connection closed by peer
-                println!("\r\nPeer disconnected.\r");
+                messages.push("Peer disconnected.".red().to_string());
+                draw_ui(&mut stdout, &messages, &input_buffer)?;
+                std::thread::sleep(Duration::from_secs(2));
                 break;
             }
-            Ok(_n) => {
-                // Logic to display received message goes here
-                // let msg = String::from_utf8_lossy(&buffer[..n]);
-                // print!("{}\r", msg);
+            Ok(n) => {
+                let received_msg = String::from_utf8_lossy(&buffer[..n]);
+                let clean_msg = received_msg.trim(); 
+                if !clean_msg.is_empty() {
+                    messages.push(format!("{} >> {}", "[They]".cyan(), clean_msg));
+                    needs_redraw = true;
+                }
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // No data yet, continue loop
+                // No data, continue
             }
-            Err(_) => break, // Real error
+            Err(_) => {
+                messages.push("Connection Error.".red().to_string());
+                needs_redraw = true;
+            }
+        }
+
+        if needs_redraw {
+            draw_ui(&mut stdout, &messages, &input_buffer)?;
         }
     }
 
-    // Cleanup
     execute!(stdout, LeaveAlternateScreen)?;
     disable_raw_mode()?;
     println!("{}", "Session ended.".yellow());
+    Ok(())
+}
+
+fn draw_ui(stdout: &mut io::Stdout, messages: &[String], input_buffer: &str) -> io::Result<()> {
+    let (cols, rows) = size()?;
+
+    execute!(stdout, Clear(ClearType::All))?;
+    
+    let available_lines = (rows as usize).saturating_sub(2);
+    
+    let start_index = if messages.len() > available_lines {
+        messages.len() - available_lines
+    } else {
+        0
+    };
+
+    execute!(stdout, cursor::MoveTo(0, 0))?;
+    for msg in &messages[start_index..] {
+        print!("{}\r\n", msg);
+    }
+
+    let separator_row = rows.saturating_sub(2);
+    execute!(stdout, cursor::MoveTo(0, separator_row))?;
+    let line = "-".repeat(cols as usize);
+    execute!(stdout, SetForegroundColor(Color::DarkGrey), Print(line), SetForegroundColor(Color::Reset))?;
+
+    let input_row = rows.saturating_sub(1);
+    execute!(stdout, cursor::MoveTo(0, input_row))?;
+    print!("{} {}", ">>".green().bold(), input_buffer);
+
+    io::stdout().flush()?;
+    
     Ok(())
 }
