@@ -103,11 +103,11 @@ x25519-dalek = "2.0"
 byteorder = "1.5"
 ```
 
-## ⚠️ Security Disclaimer
+## Security Disclaimer
 
 This application is intended for educational purposes. While it uses industry-standard algorithms (ChaCha20, X25519), the protocol implementation has not been professionally audited. Use with caution for sensitive communications.
 
-## 🤝 Contributing
+## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
