@@ -1,6 +1,7 @@
 mod state;
 mod network;
 mod chat;
+mod crypto;
 
 use std::io::{self, Write};
 use std::net::UdpSocket;

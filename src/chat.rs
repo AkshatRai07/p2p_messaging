@@ -9,6 +9,8 @@ use crossterm::{
     style::{Print, Color, SetForegroundColor},
 };
 use colored::*;
+use crate::crypto;
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 
 const SIGNAL_ACCEPT: u8 = b'Y';
 const SIGNAL_REJECT: u8 = b'N';
@@ -59,6 +61,24 @@ pub fn initiate_connection(target_ip: &str) -> io::Result<()> {
 }
 
 fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, Clear(ClearType::All))?;
+    println!("Performing Secure Handshake...");
+
+    let shared_secret = match crypto::perform_handshake(&stream) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Handshake failed: {}", e);
+            std::thread::sleep(Duration::from_secs(2));
+            return Ok(());
+        }
+    };
+
+    let cipher = ChaCha20Poly1305::new_from_slice(&shared_secret)
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Invalid Key"))?;
+
+    stream.set_nonblocking(true)?;
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, Clear(ClearType::All))?;
@@ -71,6 +91,7 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     let mut scroll_offset: usize = 0; 
     
     messages.push(format!("Connected to {}.", peer_addr));
+    messages.push("End-to-End Encrypted.".to_string());
     messages.push("Press 'Esc' to disconnect.".to_string());
     messages.push("---------------------------------".to_string());
 
@@ -84,17 +105,17 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
                 match key.code {
                     KeyCode::Esc => break,
                     KeyCode::Enter => {
-                        if !input_buffer.is_empty() {
-                            if let Err(e) = stream.write_all(input_buffer.as_bytes()) {
-                                messages.push(format!("Error: {}", e));
-                            } else {
-                                messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
-                                input_buffer.clear();
-                                scroll_offset = 0; 
-                            }
-                            needs_redraw = true;
-                        }
-                    }
+                     if !input_buffer.is_empty() {
+                         if let Err(e) = crypto::encrypt_and_send(&mut stream, &cipher, &input_buffer) {
+                             messages.push(format!("Error: {}", e));
+                         } else {
+                             messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
+                             input_buffer.clear();
+                             scroll_offset = 0;
+                         }
+                         needs_redraw = true;
+                     }
+                 }
                     KeyCode::Char(c) => {
                         input_buffer.push(c);
                         needs_redraw = true;
@@ -124,26 +145,21 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
             }
         }
 
-        let mut buffer = [0u8; 512];
-        match stream.read(&mut buffer) {
-            Ok(0) => {
+        match crypto::receive_and_decrypt(&mut stream, &cipher) {
+            Ok(msg) => {
+                if !msg.is_empty() {
+                    messages.push(format!("{} >> {}", "[They]".cyan(), msg));
+                    needs_redraw = true;
+                }
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                // No data waiting
+            }
+            Err(_) => {
                 messages.push("Peer disconnected.".red().to_string());
                 draw_ui(&mut stdout, &messages, &input_buffer, scroll_offset)?;
                 std::thread::sleep(Duration::from_secs(2));
                 break;
-            }
-            Ok(n) => {
-                let s = String::from_utf8_lossy(&buffer[..n]);
-                let clean_msg = s.trim();
-                if !clean_msg.is_empty() {
-                    messages.push(format!("{} >> {}", "[They]".cyan(), clean_msg));
-                    needs_redraw = true;
-                }
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(_) => {
-                messages.push("Connection Error.".red().to_string());
-                needs_redraw = true;
             }
         }
 
