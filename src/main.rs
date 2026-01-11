@@ -18,7 +18,6 @@ use colored::*;
 const PORT: u16 = 3000;
 
 fn main() -> std::io::Result<()> {
-    
     execute!(io::stdout(), SetTitle("Sandesh P2P"))?;
     let socket = UdpSocket::bind(format!("0.0.0.0:{}", PORT)).expect("couldn't bind");
     socket.set_broadcast(true).expect("set_broadcast failed");
@@ -34,6 +33,9 @@ fn main() -> std::io::Result<()> {
     print_prompt("");
 
     let mut input_buffer = String::new();
+    
+    let mut command_history: Vec<String> = Vec::new();
+    let mut history_index: usize = 0;
 
     loop {
         if let Ok(stream) = rx.try_recv() {
@@ -57,11 +59,37 @@ fn main() -> std::io::Result<()> {
                             io::stdout().flush()?;
                         }
                     }
+                    KeyCode::Up => {
+                        if !command_history.is_empty() && history_index > 0 {
+                            history_index -= 1;
+                            input_buffer = command_history[history_index].clone();
+                            print_prompt_clean(&input_buffer);
+                        }
+                    }
+                    KeyCode::Down => {
+                        if history_index < command_history.len() {
+                            history_index += 1;
+                            
+                            if history_index == command_history.len() {
+                                input_buffer.clear();
+                            } else {
+                                input_buffer = command_history[history_index].clone();
+                            }
+                            print_prompt_clean(&input_buffer);
+                        }
+                    }
                     KeyCode::Enter => {
-                        println!("\r");
-                        let command_line = input_buffer.clone();
+                        println!("\r"); 
+                        let command_line = input_buffer.trim().to_string();
+                        
+                        if !command_line.is_empty() {
+                            command_history.push(command_line.clone());
+                        }
+                        
+                        history_index = command_history.len();
+                        
                         input_buffer.clear();
-
+                        
                         disable_raw_mode()?; 
                         handle_command(&command_line, &known_peers)?;
                         enable_raw_mode()?;
@@ -73,6 +101,13 @@ fn main() -> std::io::Result<()> {
             }
         }
     }
+}
+
+fn print_prompt_clean(text: &str) {
+    print!("\r");
+    execute!(io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::UntilNewLine)).unwrap();
+    print!("{} {}", "SANDESH >> ".green().bold(), text);
+    io::stdout().flush().unwrap();
 }
 
 fn handle_command(input: &str, known_peers: &state::PeerMap) -> io::Result<()> {

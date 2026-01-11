@@ -68,12 +68,13 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     let peer_addr = stream.peer_addr()?.to_string();
     let mut input_buffer = String::new();
     let mut messages: Vec<String> = Vec::new();
-
+    let mut scroll_offset: usize = 0; 
+    
     messages.push(format!("Connected to {}.", peer_addr));
     messages.push("Press 'Esc' to disconnect.".to_string());
     messages.push("---------------------------------".to_string());
 
-    draw_ui(&mut stdout, &messages, &input_buffer)?;
+    draw_ui(&mut stdout, &messages, &input_buffer, scroll_offset)?;
 
     loop {
         let mut needs_redraw = false;
@@ -85,11 +86,11 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
                     KeyCode::Enter => {
                         if !input_buffer.is_empty() {
                             if let Err(e) = stream.write_all(input_buffer.as_bytes()) {
-                                messages.push(format!("Error sending: {}", e));
+                                messages.push(format!("Error: {}", e));
                             } else {
-                                // Add to our history
-                                messages.push(format!("{} >> {}", "[You] ".green(), input_buffer));
+                                messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
                                 input_buffer.clear();
+                                scroll_offset = 0; 
                             }
                             needs_redraw = true;
                         }
@@ -102,6 +103,22 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
                         input_buffer.pop();
                         needs_redraw = true;
                     }
+                    KeyCode::PageUp | KeyCode::Up => {
+                        let (_cols, rows) = size()?;
+                        let view_height = (rows as usize).saturating_sub(2);
+                        let max_scroll = messages.len().saturating_sub(view_height);
+                        
+                        if scroll_offset < max_scroll {
+                            scroll_offset += 1;
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::PageDown | KeyCode::Down => {
+                        if scroll_offset > 0 {
+                            scroll_offset -= 1;
+                            needs_redraw = true;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -111,21 +128,19 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
         match stream.read(&mut buffer) {
             Ok(0) => {
                 messages.push("Peer disconnected.".red().to_string());
-                draw_ui(&mut stdout, &messages, &input_buffer)?;
+                draw_ui(&mut stdout, &messages, &input_buffer, scroll_offset)?;
                 std::thread::sleep(Duration::from_secs(2));
                 break;
             }
             Ok(n) => {
-                let received_msg = String::from_utf8_lossy(&buffer[..n]);
-                let clean_msg = received_msg.trim(); 
+                let s = String::from_utf8_lossy(&buffer[..n]);
+                let clean_msg = s.trim();
                 if !clean_msg.is_empty() {
                     messages.push(format!("{} >> {}", "[They]".cyan(), clean_msg));
                     needs_redraw = true;
                 }
             }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // No data, continue
-            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
             Err(_) => {
                 messages.push("Connection Error.".red().to_string());
                 needs_redraw = true;
@@ -133,7 +148,7 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
         }
 
         if needs_redraw {
-            draw_ui(&mut stdout, &messages, &input_buffer)?;
+            draw_ui(&mut stdout, &messages, &input_buffer, scroll_offset)?;
         }
     }
 
@@ -143,21 +158,29 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     Ok(())
 }
 
-fn draw_ui(stdout: &mut io::Stdout, messages: &[String], input_buffer: &str) -> io::Result<()> {
+fn draw_ui(
+    stdout: &mut io::Stdout, 
+    messages: &[String], 
+    input_buffer: &str, 
+    scroll_offset: usize
+) -> io::Result<()> {
     let (cols, rows) = size()?;
-
     execute!(stdout, Clear(ClearType::All))?;
-    
+
     let available_lines = (rows as usize).saturating_sub(2);
     
-    let start_index = if messages.len() > available_lines {
-        messages.len() - available_lines
+    let total_msgs = messages.len();
+    let end_index = total_msgs.saturating_sub(scroll_offset);
+    let start_index = end_index.saturating_sub(available_lines);
+
+    let slice = if start_index < messages.len() && end_index <= messages.len() {
+        &messages[start_index..end_index]
     } else {
-        0
+        &[] 
     };
 
     execute!(stdout, cursor::MoveTo(0, 0))?;
-    for msg in &messages[start_index..] {
+    for msg in slice {
         print!("{}\r\n", msg);
     }
 
@@ -171,6 +194,5 @@ fn draw_ui(stdout: &mut io::Stdout, messages: &[String], input_buffer: &str) -> 
     print!("{} {}", ">>".green().bold(), input_buffer);
 
     io::stdout().flush()?;
-    
     Ok(())
 }
