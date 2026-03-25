@@ -1,8 +1,8 @@
-use std::net::{UdpSocket, TcpListener, TcpStream};
+use crate::state::PeerMap;
+use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::mpsc::Sender;
-use crate::state::PeerMap;
 
 const BROADCAST_ADDR: &str = "255.255.255.255";
 const PROTOCOL_MSG: &[u8] = b"HELLO_P2P";
@@ -14,13 +14,14 @@ pub fn start_background_tasks(
     socket: UdpSocket,
     peers: PeerMap,
     port: u16,
-    conn_sender: Sender<TcpStream>
+    conn_sender: Sender<TcpStream>,
 ) {
-    
     let socket_listener = socket.try_clone().expect("failed to clone into listener");
-    let socket_broadcaster = socket.try_clone().expect("failed to clone into broadcaster");
+    let socket_broadcaster = socket
+        .try_clone()
+        .expect("failed to clone into broadcaster");
     let peers_cleanup = peers.clone();
-    
+
     thread::spawn(move || {
         let mut buffer = [0u8; 1024];
         loop {
@@ -53,9 +54,9 @@ pub fn start_background_tasks(
     });
 
     thread::spawn(move || {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-            .expect("Could not bind TCP listener");
-        
+        let listener =
+            TcpListener::bind(format!("0.0.0.0:{}", port)).expect("Could not bind TCP listener");
+
         for stream in listener.incoming() {
             match stream {
                 Ok(s) => {

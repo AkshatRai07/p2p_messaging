@@ -1,16 +1,19 @@
-use std::io::{self, Read, Write};
-use std::net::TcpStream;
-use std::time::Duration;
+use crate::crypto;
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+use colored::*;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
-    style::{Print, Color, SetForegroundColor},
+    style::{Color, Print, SetForegroundColor},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode, size,
+    },
 };
-use colored::*;
-use crate::crypto;
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
+use std::time::Duration;
 
 const SIGNAL_ACCEPT: u8 = b'Y';
 const SIGNAL_REJECT: u8 = b'N';
@@ -18,7 +21,12 @@ const SIGNAL_REJECT: u8 = b'N';
 pub fn handle_incoming_request(mut stream: TcpStream) -> io::Result<()> {
     let peer_addr = stream.peer_addr()?;
 
-    print!("\r\n{} {} {} (y/n)? ", "Incoming connection from".yellow(), peer_addr, "Accept".bold());
+    print!(
+        "\r\n{} {} {} (y/n)? ",
+        "Incoming connection from".yellow(),
+        peer_addr,
+        "Accept".bold()
+    );
     io::stdout().flush()?;
 
     let mut response = String::new();
@@ -28,7 +36,7 @@ pub fn handle_incoming_request(mut stream: TcpStream) -> io::Result<()> {
         stream.write_all(&[SIGNAL_ACCEPT])?;
         enter_chat_window(stream)?;
     } else {
-        let _ = stream.write_all(&[SIGNAL_REJECT]); 
+        let _ = stream.write_all(&[SIGNAL_REJECT]);
         println!("{}", "Connection rejected.".red());
     }
     Ok(())
@@ -36,17 +44,17 @@ pub fn handle_incoming_request(mut stream: TcpStream) -> io::Result<()> {
 
 pub fn initiate_connection(target_ip: &str) -> io::Result<()> {
     println!("{}", format!("Connecting to {}...", target_ip).yellow());
-    
+
     match TcpStream::connect(target_ip) {
         Ok(mut stream) => {
             stream.set_read_timeout(Some(Duration::from_secs(10)))?;
             println!("Waiting for peer to accept...");
-            
+
             let mut buffer = [0u8; 1];
             match stream.read_exact(&mut buffer) {
                 Ok(_) => {
                     if buffer[0] == SIGNAL_ACCEPT {
-                        stream.set_read_timeout(None)?; 
+                        stream.set_read_timeout(None)?;
                         enter_chat_window(stream)?;
                     } else {
                         println!("{}", "Connection was rejected by peer.".red());
@@ -88,8 +96,8 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     let peer_addr = stream.peer_addr()?.to_string();
     let mut input_buffer = String::new();
     let mut messages: Vec<String> = Vec::new();
-    let mut scroll_offset: usize = 0; 
-    
+    let mut scroll_offset: usize = 0;
+
     messages.push(format!("Connected to {}.", peer_addr));
     messages.push("End-to-End Encrypted.".to_string());
     messages.push("Press 'Esc' to disconnect.".to_string());
@@ -105,17 +113,19 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
                 match key.code {
                     KeyCode::Esc => break,
                     KeyCode::Enter => {
-                     if !input_buffer.is_empty() {
-                         if let Err(e) = crypto::encrypt_and_send(&mut stream, &cipher, &input_buffer) {
-                             messages.push(format!("Error: {}", e));
-                         } else {
-                             messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
-                             input_buffer.clear();
-                             scroll_offset = 0;
-                         }
-                         needs_redraw = true;
-                     }
-                 }
+                        if !input_buffer.is_empty() {
+                            if let Err(e) =
+                                crypto::encrypt_and_send(&mut stream, &cipher, &input_buffer)
+                            {
+                                messages.push(format!("Error: {}", e));
+                            } else {
+                                messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
+                                input_buffer.clear();
+                                scroll_offset = 0;
+                            }
+                            needs_redraw = true;
+                        }
+                    }
                     KeyCode::Char(c) => {
                         input_buffer.push(c);
                         needs_redraw = true;
@@ -128,7 +138,7 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
                         let (_cols, rows) = size()?;
                         let view_height = (rows as usize).saturating_sub(2);
                         let max_scroll = messages.len().saturating_sub(view_height);
-                        
+
                         if scroll_offset < max_scroll {
                             scroll_offset += 1;
                             needs_redraw = true;
@@ -175,16 +185,16 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
 }
 
 fn draw_ui(
-    stdout: &mut io::Stdout, 
-    messages: &[String], 
-    input_buffer: &str, 
-    scroll_offset: usize
+    stdout: &mut io::Stdout,
+    messages: &[String],
+    input_buffer: &str,
+    scroll_offset: usize,
 ) -> io::Result<()> {
     let (cols, rows) = size()?;
     execute!(stdout, Clear(ClearType::All))?;
 
     let available_lines = (rows as usize).saturating_sub(2);
-    
+
     let total_msgs = messages.len();
     let end_index = total_msgs.saturating_sub(scroll_offset);
     let start_index = end_index.saturating_sub(available_lines);
@@ -192,7 +202,7 @@ fn draw_ui(
     let slice = if start_index < messages.len() && end_index <= messages.len() {
         &messages[start_index..end_index]
     } else {
-        &[] 
+        &[]
     };
 
     execute!(stdout, cursor::MoveTo(0, 0))?;
@@ -203,7 +213,12 @@ fn draw_ui(
     let separator_row = rows.saturating_sub(2);
     execute!(stdout, cursor::MoveTo(0, separator_row))?;
     let line = "-".repeat(cols as usize);
-    execute!(stdout, SetForegroundColor(Color::DarkGrey), Print(line), SetForegroundColor(Color::Reset))?;
+    execute!(
+        stdout,
+        SetForegroundColor(Color::DarkGrey),
+        Print(line),
+        SetForegroundColor(Color::Reset)
+    )?;
 
     let input_row = rows.saturating_sub(1);
     execute!(stdout, cursor::MoveTo(0, input_row))?;

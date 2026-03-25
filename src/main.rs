@@ -1,20 +1,23 @@
-mod state;
-mod network;
 mod chat;
 mod crypto;
+mod network;
+mod state;
 
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use colored::*;
 use crossterm::{
     cursor,
+    event::{self, Event, KeyCode},
     execute,
-    terminal::{Clear, ClearType, SetTitle, enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    event::{self, KeyCode, Event},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
-use colored::*;
 
 const PORT: u16 = 3001;
 
@@ -34,16 +37,16 @@ fn main() -> std::io::Result<()> {
     print_prompt("");
 
     let mut input_buffer = String::new();
-    
+
     let mut command_history: Vec<String> = Vec::new();
     let mut history_index: usize = 0;
 
     loop {
         if let Ok(stream) = rx.try_recv() {
-            disable_raw_mode()?; 
+            disable_raw_mode()?;
             chat::handle_incoming_request(stream)?;
             enable_raw_mode()?;
-            print_prompt(&input_buffer); 
+            print_prompt(&input_buffer);
         }
 
         if event::poll(Duration::from_millis(100))? {
@@ -56,7 +59,7 @@ fn main() -> std::io::Result<()> {
                     }
                     KeyCode::Backspace => {
                         if input_buffer.pop().is_some() {
-                            print!("\x08 \x08"); 
+                            print!("\x08 \x08");
                             io::stdout().flush()?;
                         }
                     }
@@ -70,7 +73,7 @@ fn main() -> std::io::Result<()> {
                     KeyCode::Down => {
                         if history_index < command_history.len() {
                             history_index += 1;
-                            
+
                             if history_index == command_history.len() {
                                 input_buffer.clear();
                             } else {
@@ -80,18 +83,18 @@ fn main() -> std::io::Result<()> {
                         }
                     }
                     KeyCode::Enter => {
-                        println!("\r"); 
+                        println!("\r");
                         let command_line = input_buffer.trim().to_string();
-                        
+
                         if !command_line.is_empty() {
                             command_history.push(command_line.clone());
                         }
-                        
+
                         history_index = command_history.len();
-                        
+
                         input_buffer.clear();
-                        
-                        disable_raw_mode()?; 
+
+                        disable_raw_mode()?;
                         handle_command(&command_line, &known_peers)?;
                         enable_raw_mode()?;
 
@@ -106,15 +109,21 @@ fn main() -> std::io::Result<()> {
 
 fn print_prompt_clean(text: &str) {
     print!("\r");
-    execute!(io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::UntilNewLine)).unwrap();
+    execute!(
+        io::stdout(),
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::UntilNewLine)
+    )
+    .unwrap();
     print!("{} {}", "SANDESH >> ".green().bold(), text);
     io::stdout().flush().unwrap();
 }
 
 fn handle_command(input: &str, known_peers: &state::PeerMap) -> io::Result<()> {
     let parts: Vec<&str> = input.split_whitespace().collect();
-    if parts.is_empty() { return Ok(()); }
-    
+    if parts.is_empty() {
+        return Ok(());
+    }
+
     let command = parts[0];
     let args = &parts[1..];
 
@@ -172,7 +181,7 @@ fn print_prompt(current_input: &str) {
 }
 
 fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
-    enable_raw_mode()?; 
+    enable_raw_mode()?;
     let mut stdout = io::stdout();
 
     execute!(stdout, EnterAlternateScreen, cursor::Show)?;
@@ -194,13 +203,13 @@ fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
         let current_peers = shared_peers.lock().unwrap();
 
         execute!(
-            stdout, 
-            cursor::MoveTo(0, 3), 
+            stdout,
+            cursor::MoveTo(0, 3),
             Clear(ClearType::FromCursorDown)
         )?;
 
         if current_peers.is_empty() {
-             println!("{}\r", "Waiting for signals...".italic().dimmed());
+            println!("{}\r", "Waiting for signals...".italic().dimmed());
         } else {
             let mut sorted_peers: Vec<_> = current_peers.keys().collect();
             sorted_peers.sort();
@@ -209,11 +218,11 @@ fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
                 println!("{} {}\r", "•".green(), peer);
             }
         }
-        
+
         drop(current_peers);
         stdout.flush()?;
     }
-    
+
     execute!(stdout, LeaveAlternateScreen, cursor::Show)?;
     disable_raw_mode()?;
     Ok(())
