@@ -83,7 +83,7 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     };
 
     let cipher = ChaCha20Poly1305::new_from_slice(&shared_secret)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Invalid Key"))?;
+        .map_err(|_| io::Error::other("Invalid Key"))?;
 
     stream.set_nonblocking(true)?;
 
@@ -108,50 +108,50 @@ fn enter_chat_window(mut stream: TcpStream) -> io::Result<()> {
     loop {
         let mut needs_redraw = false;
 
-        if event::poll(Duration::from_millis(10))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Esc => break,
-                    KeyCode::Enter => {
-                        if !input_buffer.is_empty() {
-                            if let Err(e) =
-                                crypto::encrypt_and_send(&mut stream, &cipher, &input_buffer)
-                            {
-                                messages.push(format!("Error: {}", e));
-                            } else {
-                                messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
-                                input_buffer.clear();
-                                scroll_offset = 0;
-                            }
-                            needs_redraw = true;
+        if event::poll(Duration::from_millis(10))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Esc => break,
+                KeyCode::Enter => {
+                    if !input_buffer.is_empty() {
+                        if let Err(e) =
+                            crypto::encrypt_and_send(&mut stream, &cipher, &input_buffer)
+                        {
+                            messages.push(format!("Error: {}", e));
+                        } else {
+                            messages.push(format!("{} >> {}", " [You]".green(), input_buffer));
+                            input_buffer.clear();
+                            scroll_offset = 0;
                         }
-                    }
-                    KeyCode::Char(c) => {
-                        input_buffer.push(c);
                         needs_redraw = true;
                     }
-                    KeyCode::Backspace => {
-                        input_buffer.pop();
-                        needs_redraw = true;
-                    }
-                    KeyCode::PageUp | KeyCode::Up => {
-                        let (_cols, rows) = size()?;
-                        let view_height = (rows as usize).saturating_sub(2);
-                        let max_scroll = messages.len().saturating_sub(view_height);
-
-                        if scroll_offset < max_scroll {
-                            scroll_offset += 1;
-                            needs_redraw = true;
-                        }
-                    }
-                    KeyCode::PageDown | KeyCode::Down => {
-                        if scroll_offset > 0 {
-                            scroll_offset -= 1;
-                            needs_redraw = true;
-                        }
-                    }
-                    _ => {}
                 }
+                KeyCode::Char(c) => {
+                    input_buffer.push(c);
+                    needs_redraw = true;
+                }
+                KeyCode::Backspace => {
+                    input_buffer.pop();
+                    needs_redraw = true;
+                }
+                KeyCode::PageUp | KeyCode::Up => {
+                    let (_cols, rows) = size()?;
+                    let view_height = (rows as usize).saturating_sub(2);
+                    let max_scroll = messages.len().saturating_sub(view_height);
+
+                    if scroll_offset < max_scroll {
+                        scroll_offset += 1;
+                        needs_redraw = true;
+                    }
+                }
+                KeyCode::PageDown | KeyCode::Down => {
+                    if scroll_offset > 0 {
+                        scroll_offset -= 1;
+                        needs_redraw = true;
+                    }
+                }
+                _ => {}
             }
         }
 

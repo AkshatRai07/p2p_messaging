@@ -36,7 +36,7 @@ pub fn encrypt_and_send(
 
     let ciphertext = cipher
         .encrypt(nonce, msg.as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Encryption failed"))?;
+        .map_err(|_| io::Error::other("Encryption failed"))?;
 
     let total_len = 12 + ciphertext.len();
 

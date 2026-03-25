@@ -49,59 +49,59 @@ fn main() -> std::io::Result<()> {
             print_prompt(&input_buffer);
         }
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char(c) => {
-                        input_buffer.push(c);
-                        print!("{}", c);
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char(c) => {
+                    input_buffer.push(c);
+                    print!("{}", c);
+                    io::stdout().flush()?;
+                }
+                KeyCode::Backspace => {
+                    if input_buffer.pop().is_some() {
+                        print!("\x08 \x08");
                         io::stdout().flush()?;
                     }
-                    KeyCode::Backspace => {
-                        if input_buffer.pop().is_some() {
-                            print!("\x08 \x08");
-                            io::stdout().flush()?;
-                        }
-                    }
-                    KeyCode::Up => {
-                        if !command_history.is_empty() && history_index > 0 {
-                            history_index -= 1;
-                            input_buffer = command_history[history_index].clone();
-                            print_prompt_clean(&input_buffer);
-                        }
-                    }
-                    KeyCode::Down => {
-                        if history_index < command_history.len() {
-                            history_index += 1;
-
-                            if history_index == command_history.len() {
-                                input_buffer.clear();
-                            } else {
-                                input_buffer = command_history[history_index].clone();
-                            }
-                            print_prompt_clean(&input_buffer);
-                        }
-                    }
-                    KeyCode::Enter => {
-                        println!("\r");
-                        let command_line = input_buffer.trim().to_string();
-
-                        if !command_line.is_empty() {
-                            command_history.push(command_line.clone());
-                        }
-
-                        history_index = command_history.len();
-
-                        input_buffer.clear();
-
-                        disable_raw_mode()?;
-                        handle_command(&command_line, &known_peers)?;
-                        enable_raw_mode()?;
-
-                        print_prompt("");
-                    }
-                    _ => {}
                 }
+                KeyCode::Up => {
+                    if !command_history.is_empty() && history_index > 0 {
+                        history_index -= 1;
+                        input_buffer = command_history[history_index].clone();
+                        print_prompt_clean(&input_buffer);
+                    }
+                }
+                KeyCode::Down => {
+                    if history_index < command_history.len() {
+                        history_index += 1;
+
+                        if history_index == command_history.len() {
+                            input_buffer.clear();
+                        } else {
+                            input_buffer = command_history[history_index].clone();
+                        }
+                        print_prompt_clean(&input_buffer);
+                    }
+                }
+                KeyCode::Enter => {
+                    println!("\r");
+                    let command_line = input_buffer.trim().to_string();
+
+                    if !command_line.is_empty() {
+                        command_history.push(command_line.clone());
+                    }
+
+                    history_index = command_history.len();
+
+                    input_buffer.clear();
+
+                    disable_raw_mode()?;
+                    handle_command(&command_line, &known_peers)?;
+                    enable_raw_mode()?;
+
+                    print_prompt("");
+                }
+                _ => {}
             }
         }
     }
@@ -191,12 +191,12 @@ fn monitor_peers(shared_peers: &state::PeerMap) -> io::Result<()> {
     println!("{}\r", "---------------------------------".dimmed());
 
     loop {
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    _ => {}
-                }
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => break,
+                _ => {}
             }
         }
 
